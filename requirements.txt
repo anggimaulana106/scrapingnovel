@@ -1,0 +1,30 @@
+# Scrapy dan dependensinya
+scrapy>=2.6.0
+scrapy-user-agents>=0.1.1
+
+# Database
+sqlalchemy>=1.4.0
+psycopg2-binary>=2.9.0
+
+# HTTP dan Networking
+requests>=2.26.0
+urllib3>=1.26.7
+
+# Parsing dan Processing
+lxml>=4.6.3
+beautifulsoup4>=4.10.0
+parsel>=1.6.0
+
+# Utilitas
+python-dotenv>=0.19.0
+python-dateutil>=2.8.2
+pytz>=2021.3
+
+# Logging dan Monitoring
+colorlog>=6.6.0
+
+# Proxy dan User Agent
+fake-useragent>=0.1.11
+
+# Cloudflare Bypass (opsional)
+cloudscraper>=1.2.60

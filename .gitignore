@@ -1,0 +1,8 @@
+/venv/
+/scrapy/
+/scrapy/logs/
+/scrapy/logs/
+/scrapy/logs/
+/scrapy/logs/
+/scrapy/logs/
+.env
