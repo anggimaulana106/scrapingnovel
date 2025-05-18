@@ -6,3 +6,10 @@
 /scrapy/logs/
 /scrapy/logs/
 .env
+fanmtl.log
+proxies.txt
+/__pycache__/
+*.pyc
+/spiders/__pycache__/
+/utils/__pycache__/
+fanmtl_spider.log
