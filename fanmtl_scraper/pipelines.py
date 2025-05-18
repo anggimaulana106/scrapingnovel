@@ -1,122 +1,183 @@
+# In pipelines.py
 import logging
 import datetime
+import traceback
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
-from .models import Novel, Chapter, ChapterContent, create_tables
+from sqlalchemy.orm import sessionmaker
+from .models import Novel, Chapter, ChapterContent, db_connect, create_table
 from .items import NovelItem, ChapterItem, ChapterContentItem
 
-
 class PostgreSQLPipeline:
-    def __init__(self, postgres_uri):
-        self.postgres_uri = postgres_uri
+    def __init__(self, db_url):
+        self.db_url = db_url
         self.engine = None
         self.Session = None
-
+    
     @classmethod
     def from_crawler(cls, crawler):
         return cls(
-            postgres_uri=crawler.settings.get('POSTGRES_URI'),
+            db_url=crawler.settings.get('DATABASE_URL')
         )
-
+    
     def open_spider(self, spider):
-        try:
-            self.engine = create_engine(self.postgres_uri)
-            create_tables(self.engine)
-            self.Session = sessionmaker(bind=self.engine)
-            logging.info("PostgreSQL connection established successfully")
-        except Exception as e:
-            logging.error(f"Error connecting to PostgreSQL: {e}")
-            raise
-
+        # Create the engine when the spider opens
+        self.engine = create_engine(self.db_url)
+        self.Session = sessionmaker(bind=self.engine)
+        # Ensure tables exist
+        create_table(self.engine)
+        spider.logger.info("PostgreSQLPipeline opened with engine: %s", self.engine)
+    
     def close_spider(self, spider):
-        if self.engine:
-            self.engine.dispose()
-            logging.info("PostgreSQL connection closed")
-
+        spider.logger.info("PostgreSQLPipeline closed")
+    
     def process_item(self, item, spider):
         session = self.Session()
         try:
+            # Log the item being processed
+            spider.logger.info(f"Processing item in pipeline: {type(item).__name__}")
+            spider.logger.debug(f"Item data: {dict(item)}")
+            
             if isinstance(item, NovelItem):
-                self._process_novel(item, session)
+                spider.logger.debug("Item identified as NovelItem")
+                self._process_novel(item, session, spider)
             elif isinstance(item, ChapterItem):
-                self._process_chapter(item, session)
+                spider.logger.debug("Item identified as ChapterItem")
+                self._process_chapter(item, session, spider)
             elif isinstance(item, ChapterContentItem):
-                self._process_chapter_content(item, session)
+                spider.logger.debug("Item identified as ChapterContentItem")
+                self._process_chapter_content(item, session, spider)
+            else:
+                spider.logger.warning(f"Unknown item type: {type(item).__name__}")
             
             session.commit()
+            spider.logger.debug("Database session committed successfully")
             return item
         except SQLAlchemyError as e:
             session.rollback()
-            logging.error(f"Database error: {e}")
-            raise
+            spider.logger.error(f"Database error: {str(e)}")
+            # Don't raise the exception, just log it and continue
+            return item
         except Exception as e:
             session.rollback()
-            logging.error(f"Error processing item: {e}")
-            raise
+            spider.logger.error(f"Error processing item in pipeline: {str(e)}")
+            spider.logger.error(f"Traceback: {traceback.format_exc()}")
+            # Don't raise the exception, just log it and continue
+            return item
         finally:
             session.close()
-
-    def _process_novel(self, item, session):
-        novel = session.query(Novel).filter_by(novel_id=item['novel_id']).first()
+    
+    def _process_novel(self, item, session, spider):
+        try:
+            # Check if the novel already exists
+            novel = session.query(Novel).filter_by(novel_id=item['novel_id']).first()
+            
+            if novel:
+                # Update existing novel
+                for key, value in item.items():
+                    if key != 'created_at':  # Don't update created_at
+                        setattr(novel, key, value)
+                novel.updated_at = datetime.datetime.utcnow()
+                spider.logger.debug(f"Updated existing novel: {novel.title}")
+            else:
+                # Create new novel
+                novel = Novel(**item)
+                session.add(novel)
+                spider.logger.debug(f"Added new novel: {novel.title}")
         
-        if novel:
-            # Update existing novel
-            novel.title = item['title']
-            novel.url = item['url']
-            novel.chapters = item['chapters']
-            novel.status = item['status']
-            novel.updated_at = datetime.datetime.utcnow()
-        else:
-            # Create new novel
-            novel = Novel(
+        except Exception as e:
+            spider.logger.error(f"Error in _process_novel: {str(e)}")
+            spider.logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+    
+    def _process_chapter(self, item, session, spider):
+        try:
+            # Check if the novel exists
+            novel = session.query(Novel).filter_by(novel_id=item['novel_id']).first()
+            if not novel:
+                spider.logger.warning(f"Novel with ID {item['novel_id']} not found, cannot add chapter")
+                return
+            
+            # Check if the chapter already exists
+            chapter = session.query(Chapter).filter_by(
                 novel_id=item['novel_id'],
-                title=item['title'],
-                url=item['url'],
-                chapters=item['chapters'],
-                status=item['status']
-            )
-            session.add(novel)
-
-    def _process_chapter(self, item, session):
-        chapter = session.query(Chapter).filter_by(
-            novel_id=item['novel_id'],
-            chapter_number=item['chapter_number']
-        ).first()
-        
-        if chapter:
-            # Update existing chapter
-            chapter.chapter_title = item['chapter_title']
-            chapter.chapter_url = item['chapter_url']
-            chapter.chapter_date = item['chapter_date']
-            chapter.updated_at = datetime.datetime.utcnow()
-        else:
-            # Create new chapter
-            chapter = Chapter(
-                novel_id=item['novel_id'],
-                chapter_number=item['chapter_number'],
-                chapter_title=item['chapter_title'],
-                chapter_url=item['chapter_url'],
-                chapter_date=item['chapter_date']
-            )
-            session.add(chapter)
-            session.flush()  # Flush to get the ID
-        
-        return chapter
-
-    def _process_chapter_content(self, item, session):
-        chapter_content = session.query(ChapterContent).filter_by(
-            chapter_id=item['chapter_id']
-        ).first()
-        
-        if chapter_content:
-            # Update existing content
-            chapter_content.chapter_text = item['chapter_text']
-            chapter_content.updated_at = datetime.datetime.utcnow()
-        else:
-            # Create new content
-            chapter_content = ChapterContent(
-                chapter_id=item['chapter_id'],
-                chapter_text=item['chapter_text']
-            )
-            session.add(chapter_content)
+                chapter_number=item['chapter_number']
+            ).first()
+            
+            if chapter:
+                # Update existing chapter
+                for key, value in item.items():
+                    if key != 'created_at':  # Don't update created_at
+                        setattr(chapter, key, value)
+                chapter.updated_at = datetime.datetime.utcnow()
+                spider.logger.debug(f"Updated existing chapter: {chapter.chapter_number}")
+            else:
+                # Create new chapter
+                chapter = Chapter(**item)
+                session.add(chapter)
+                spider.logger.debug(f"Added new chapter: {chapter.chapter_number}")
+            
+        except Exception as e:
+            spider.logger.error(f"Error in _process_chapter: {str(e)}")
+            spider.logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+    
+    def _process_chapter_content(self, item, session, spider):
+        try:
+            # Extract the chapter_id from the composite key
+            chapter_id = item['chapter_id']
+            
+            # Parse the chapter_id to get novel_id and chapter_number
+            parts = chapter_id.split('_')
+            if len(parts) == 2:
+                novel_id, chapter_number = parts
+                try:
+                    chapter_number = int(chapter_number)
+                except ValueError:
+                    spider.logger.warning(f"Invalid chapter number in chapter_id: {chapter_id}")
+                    return
+                
+                # Find the chapter by novel_id and chapter_number
+                chapter = session.query(Chapter).filter_by(
+                    novel_id=novel_id,
+                    chapter_number=chapter_number
+                ).first()
+                
+                if not chapter:
+                    spider.logger.warning(f"Chapter not found for novel_id={novel_id}, chapter_number={chapter_number}")
+                    return
+                
+                # Use the chapter's ID for the chapter_content
+                real_chapter_id = chapter.id
+            else:
+                # Try to use the chapter_id directly
+                try:
+                    real_chapter_id = int(chapter_id)
+                except ValueError:
+                    spider.logger.warning(f"Invalid chapter_id format: {chapter_id}")
+                    return
+            
+            # Check if the chapter content already exists
+            chapter_content = session.query(ChapterContent).filter_by(
+                chapter_id=real_chapter_id
+            ).first()
+            
+            if chapter_content:
+                # Update existing chapter content
+                for key, value in item.items():
+                    if key != 'created_at' and key != 'chapter_id':  # Don't update created_at or chapter_id
+                        setattr(chapter_content, key, value)
+                chapter_content.updated_at = datetime.datetime.utcnow()
+                spider.logger.debug(f"Updated existing chapter content for chapter_id: {real_chapter_id}")
+            else:
+                # Create new chapter content with the real chapter_id
+                new_item = dict(item)
+                new_item['chapter_id'] = real_chapter_id
+                chapter_content = ChapterContent(**new_item)
+                session.add(chapter_content)
+                spider.logger.debug(f"Added new chapter content for chapter_id: {real_chapter_id}")
+            
+        except Exception as e:
+            spider.logger.error(f"Error in _process_chapter_content: {str(e)}")
+            spider.logger.error(f"Traceback: {traceback.format_exc()}")
+            raise

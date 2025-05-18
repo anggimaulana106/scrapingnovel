@@ -84,10 +84,11 @@ USER_AGENTS = [
     'Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36',
     'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
 ]
+# Database settings
+DATABASE_URL = 'postgresql://postgres:salonpas@localhost:5444/postgres'
 
-# Log level
-LOG_LEVEL = 'INFO'
-
-# Enable logging of HTTP requests
+# Logging settings
+LOG_LEVEL = 'DEBUG'
+LOG_FILE = 'fanmtl_spider.log'
 LOG_FORMAT = '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
 LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
